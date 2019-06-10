@@ -131,9 +131,10 @@ void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers)
 void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
 					   const std::unordered_map<std::string, std::string> &refs)
 {
-#pragma omp parallel
+
+		#pragma omp parallel
 		{
-#pragma omp single
+				#pragma omp single
 				{
 						std::string last_seq_name = "";
 						VB vb(opt::k, opt::error_rate);
@@ -152,7 +153,7 @@ void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
 								}
 								if (!vb.is_near_to_last(v) || last_seq_name != v.seq_name)
 								{
-#pragma omp task firstprivate(vb, last_seq_name)
+										#pragma omp task firstprivate(vb, last_seq_name)
 										{
 												VK_GROUP kmers = vb.extract_kmers(refs.at(last_seq_name));
 												add_kmers_to_bf(bf, ref_bf, kmers);
@@ -174,7 +175,7 @@ void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
 void populate_context_bf(const BF &bf, BF &context_bf,
 						 const std::unordered_map<std::string, std::string> &refs,
 						 std::vector<std::string> &used_seq_names) {
-#pragma omp parallel
+		#pragma omp parallel
 		{
 				for (long unsigned int seq = 0; seq < used_seq_names.size(); ++seq)
 				{
@@ -182,7 +183,7 @@ void populate_context_bf(const BF &bf, BF &context_bf,
 						int pos = (opt::ref_k - opt::k) / 2;
 						auto size = reference.size();
 
-#pragma omp for // collapse(2)
+						#pragma omp for // collapse(2)
 						for (long unsigned int p = opt::ref_k; p < size; ++p)
 						{
 								auto it0 = p - opt::ref_k;
@@ -334,23 +335,23 @@ int main(int argc, char *argv[])
 		std::future<void> bf_rank;
 		double t0, t1;
 		// STEP 1: add VCF kmers to bloom filter
-#pragma omp parallel
+		#pragma omp parallel
 		{
-#pragma omp single
+				#pragma omp single
 				{
-#pragma omp task
+						#pragma omp task
 						{
 								refs = read_references();
 						}
-#pragma omp task
+						#pragma omp task
 						{
 								bf = BF(opt::bf_size);
 						}
-#pragma omp task
+						#pragma omp task
 						{
 								context_bf = BF(opt::bf_size);
 						}
-#pragma omp task
+						#pragma omp task
 						{
 								vs = read_variants();
 								for (const auto &v : vs)

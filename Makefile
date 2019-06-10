@@ -1,4 +1,4 @@
-#CXX = $(shell icc -v 2>&1 >/dev/null | grep -o "icc")
+CXX = $(shell icc -v 2>&1 >/dev/null | grep -o "icc")
 CXXFLAGS = -Wall -g -std=c++14 -O3 -fopenmp 
 
 ifeq ($(CXX), icc)
