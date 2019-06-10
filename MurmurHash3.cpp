@@ -269,6 +269,7 @@ void MurmurHash3_x64_128 ( const void * key, const int len,
 
   const uint64_t * blocks = (const uint64_t *)(data);
 
+  //#pragma omp simd
   for(int i = 0; i < nblocks; i++)
   {
     uint64_t k1 = getblock64(blocks,i*2+0);

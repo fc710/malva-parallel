@@ -33,6 +33,8 @@
 #include <math.h>
 #include <zlib.h>
 
+#include "tbb/tbb.h"
+
 #include "hts_log.h"
 #include "kmc_api/kmc_file.h"
 #include "kseq.h"
@@ -42,6 +44,7 @@
 #include "bloom_filter.hpp"
 #include "var_block.hpp"
 #include "kmap.hpp"
+
 
 auto start_t = std::chrono::high_resolution_clock::now();
 
@@ -61,7 +64,7 @@ void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers) {
   for (const auto &v : kmers) {
     // For each variant
     for (const auto &p : v.second) {
-      // For each allele of the variant
+      // For each allele of the variant/
       for (const auto &Ks : p.second) {
         // For each list of kmers of the allele
         for (const auto &kmer : Ks) {
@@ -141,6 +144,8 @@ int main(int argc, char *argv[]) {
 
   parse_arguments(argc, argv);
 
+  //tbb::task_scheduler_init init(1);
+
   // STEP 0: open and check input files
   gzFile fasta_in = gzopen(opt::fasta_path.c_str(), "r");
   kseq_t *reference = kseq_init(fasta_in);
@@ -176,7 +181,10 @@ int main(int argc, char *argv[]) {
   VB vb(opt::k, opt::error_rate);
   std::string last_seq_name = "";
 
+  //int gdbcount = 0; //ctr
+  
   while (bcf_read(vcf, vcf_header, vcf_record) == 0) {
+	  //  ++gdbcount;
     bcf_unpack(vcf_record, BCF_UN_STR);
     Variant v(vcf_header, vcf_record, opt::pop);
 
@@ -232,25 +240,55 @@ int main(int argc, char *argv[]) {
 
   pelapsed("BF creation complete");
 
+  /* tbb::parallel_for(tbb::blocked_range<size_t>(0, used_seq_names.size(),20000),
+					[&](const tbb::blocked_range<size_t>& r){
+						for(size_t i=r.begin(); i!= r.end(); ++i){
+							//	for(const auto &seq_name : used_seq_names) {
+							std::string reference = refs.at(used_seq_names[i]);
+							std::string ref_ksub(reference, (opt::ref_k - opt::k) / 2, opt::k);
+							std::string context(reference, 0, opt::ref_k);
+							std::transform(ref_ksub.begin(), ref_ksub.end(), ref_ksub.begin(), ::toupper);
+							std::transform(context.begin(), context.end(), context.begin(), ::toupper);
+							if (bf.test_key(ref_ksub.c_str()))
+								context_bf.add_key(context.c_str());
+							for (uint p = opt::ref_k; p < reference.size(); ++p) {
+								char c1 = toupper(reference[p]);
+								context.erase(0, 1);
+								context += c1;
+								char c2 = toupper(reference[p - (opt::ref_k - opt::k) / 2]);
+								ref_ksub.erase(0, 1);
+								ref_ksub += c2;
+								if (bf.test_key(ref_ksub.c_str()))
+									context_bf.add_key(context.c_str());
+							}
+						}
+					}
+					);
+  */
+
   for(const auto &seq_name : used_seq_names) {
     std::string reference = refs[seq_name];
     std::string ref_ksub(reference, (opt::ref_k - opt::k) / 2, opt::k);
     std::string context(reference, 0, opt::ref_k);
     std::transform(ref_ksub.begin(), ref_ksub.end(), ref_ksub.begin(), ::toupper);
     std::transform(context.begin(), context.end(), context.begin(), ::toupper);
+
+	
     if (bf.test_key(ref_ksub.c_str()))
       context_bf.add_key(context.c_str());
     for (uint p = opt::ref_k; p < reference.size(); ++p) {
-      char c1 = toupper(reference[p]);
+		 char c1 = toupper(reference[p]);
+	  // std::cout<<"c1: "<<c1<<std::endl;
       context.erase(0, 1);
       context += c1;
       char c2 = toupper(reference[p - (opt::ref_k - opt::k) / 2]);
       ref_ksub.erase(0, 1);
       ref_ksub += c2;
+	  
       if (bf.test_key(ref_ksub.c_str()))
-        context_bf.add_key(context.c_str());
+	  context_bf.add_key(context.c_str());
     }
-  }
+}
   pelapsed("Reference BF creation complete");
 
   context_bf.switch_mode();
@@ -262,6 +300,7 @@ int main(int argc, char *argv[]) {
   CKmerAPI kmer_obj(klen);
 
   char context[opt::ref_k + 1];
+  //int ppp = 0; //ctr
   while (kmer_db.ReadNextKmer(kmer_obj, counter)) {
     kmer_obj.to_string(context);
     std::transform(context, context + opt::ref_k, context, ::toupper);
@@ -272,6 +311,7 @@ int main(int argc, char *argv[]) {
     if (!context_bf.test_key(context)) {
       bf.increment(kmer, counter);
     }
+	//	++ppp;
   }
 
   pelapsed("BF weights created");
@@ -288,7 +328,10 @@ int main(int argc, char *argv[]) {
   vcf_record = bcf_init();
 
   last_seq_name = "";
+
+  //int pppp = 0; //ctr
   while (bcf_read(vcf, vcf_header, vcf_record) == 0) {
+	  //  ++pppp;
     bcf_unpack(vcf_record, BCF_UN_STR);
     Variant v(vcf_header, vcf_record, opt::pop);
 

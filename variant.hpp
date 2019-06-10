@@ -25,6 +25,7 @@
 #include <numeric>
 #include <string>
 #include <vector>
+#include "vcf.h"
 
 typedef std::pair<std::string, long double> GT;
 

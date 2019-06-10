@@ -24,7 +24,9 @@
 
 #include <string>
 #include <unordered_map>
-
+#include <algorithm>
+#include <cstring>
+#include "tbb/spin_mutex.h"
 // static const char RCN[128] = {
 //     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   //  0
 //     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 10
@@ -40,14 +42,14 @@
 //     'N', 0,   0, 0,   0,   0,   'A', 0,   0,   0,   // 110
 //     0,   0,   0, 0,   0,   0,   0,   0              // 120
 // };
-
+#include "bloom_filter.hpp"
 struct KMAP {
   std::unordered_map<std::string, int> kmers;
   std::unordered_map<std::string, int> _times;
 
   KMAP() {}
 
-  static const char _compl(const char &c) { return RCN[c]; }
+	static char _compl(const char &c) { return opt::RCN[c]; }
 
   std::string canonical(const char* kmer) {
     uint k = strlen(kmer);
@@ -60,6 +62,16 @@ struct KMAP {
     std::string kmer_string (ckmer);
     return kmer_string;
   }
+	std::string canonical(const std::string& kmer) const {
+		std::string ckmer(kmer);
+		std::transform(ckmer.begin(), ckmer.end(), ckmer.begin(), _compl);
+		std::reverse(ckmer.begin(), ckmer.end());
+		if(kmer.compare(ckmer) < 0)
+			return kmer;
+		else
+			return ckmer;	
+	}
+
 
   bool test_key(const char* kmer) {
     std::string ckmer = canonical(kmer);
@@ -73,11 +85,21 @@ struct KMAP {
     std::string ckmer = canonical(kmer);
     kmers[ckmer] = 0;
   }
+	void add_key(const std::string& kmer, tbb::spin_mutex &mtx){
+		std::string ckmer = canonical(kmer);
+		tbb::spin_mutex::scoped_lock lock(mtx);
+		kmers[ckmer] = 0;		
+	}
+	void add_key(const std::string& kmer){
+		std::string ckmer = canonical(kmer);
+		kmers[ckmer] = 0;		
+	}
+
 
   void increment(const char* kmer, int counter) {
     std::string ckmer = canonical(kmer);
     if(kmers.find(ckmer) != kmers.end()) {
-      uint32 new_value = kmers[ckmer] + counter;
+      uint32_t new_value = kmers[ckmer] + counter;
       kmers[ckmer] = new_value < 250 ? new_value : 250;
       ++_times[ckmer];
     }
@@ -86,7 +108,7 @@ struct KMAP {
   void increment_with_average(const char* kmer, int counter) {
     std::string ckmer = canonical(kmer);
     if(kmers.find(ckmer) != kmers.end()) {
-      uint32 new_value = (kmers[ckmer] * _times[ckmer] + counter) / (_times[ckmer]+1);
+      uint32_t new_value = (kmers[ckmer] * _times[ckmer] + counter) / (_times[ckmer]+1);
       kmers[ckmer] = new_value < 250 ? new_value : 250;
       ++_times[ckmer];
     }

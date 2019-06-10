@@ -23,6 +23,12 @@
 #define _VAR_BLOCK_HPP_
 
 #include "variant.hpp"
+#include <map>
+#include <set>
+#include <string>
+#include <iostream>
+#include <algorithm>
+#include <cmath>
 
 // Maybe these maps can be translated into vectors
 typedef std::map<int, std::map<int, std::vector<std::vector<std::string>>>> VK_GROUP;
@@ -45,10 +51,14 @@ private: // attributes
   int number_variants_out = 0;
 
 public:
+	VB() = default;
   VB(const int &_k, const float _error_rate) {
     k = _k;
     error_rate = _error_rate;
   }
+	VB(const VB& other) = default;
+	VB& operator=(VB& other) = default;
+	VB& operator=(VB&& other) = default;
   ~VB() {}
 
   bool is_near_to_last(const Variant &v) {
@@ -102,7 +112,7 @@ public:
             mid_allele = aac[0];
 
             std::string kmer = mid_allele.substr(0, k);
-            transform(kmer.begin(), kmer.end(), kmer.begin(), ::toupper);
+			std::transform(kmer.begin(), kmer.end(), kmer.begin(), ::toupper);
             ksss.push_back(kmer);
 
             for (uint p = k; p < mid_allele.size(); ++p) {
@@ -296,8 +306,6 @@ public:
   }
 
 private: // methods
-  const VB &operator=(const VB &other) { return *this; }
-  const VB &operator=(const VB &&other) { return *this; }
 
   //- General methods for managing variants --------------------------
   //------------------------------------------------------------------

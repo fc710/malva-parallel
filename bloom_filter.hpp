@@ -25,7 +25,9 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
-#include <sdsl/bit_vectors.hpp>
+#include "sdsl/bit_vectors.hpp"
+
+#include "tbb/spin_mutex.h"
 
 #include "MurmurHash3.hpp"
 #include "kmc_api/kmc_file.h"
@@ -33,7 +35,8 @@
 // using namespace std;
 using namespace sdsl;
 
-static const char RCN[128] = {
+namespace opt{
+	const char RCN[128] = {
     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   //  0
     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 10
     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 20
@@ -47,12 +50,13 @@ static const char RCN[128] = {
     0,   0,   0, 'G', 0,   0,   0,   0,   0,   0,   // 100
     'N', 0,   0, 0,   0,   0,   'A', 0,   0,   0,   // 110
     0,   0,   0, 0,   0,   0,   0,   0              // 120
-};
+	};
+}
 
 class BF {
 
 private:
-  static const char _compl(const char &c) { return RCN[c]; }
+	static inline char _compl(char c) { return opt::RCN[(int)c]; }
 
   void _canonical(const char *kmer, char *ckmer, const int &k) const {
     strcpy(ckmer, kmer);
@@ -62,23 +66,80 @@ private:
       memmove(ckmer, kmer, k);
   }
 
-  uint64_t _get_hash(const char *kmer) const {
-    uint k = strlen(kmer);
-    char ckmer[k + 1];
-    _canonical(kmer, ckmer, k);
-    std::array<uint64_t, 2> hashes;
-    MurmurHash3_x64_128(ckmer, k, 0, reinterpret_cast<void *>(&hashes));
-    return hashes[0];
-  }
-
+	std::string _canonical(const std::string& kmer) const {
+		//std::string _c(kmer);
+		std::string ckmer(kmer);
+		std::transform(ckmer.begin(), ckmer.end(), ckmer.begin(), _compl);
+		std::reverse(ckmer.begin(), ckmer.end());
+		if(kmer.compare(ckmer) < 0)
+			return kmer;
+		else
+			return ckmer;
+		
+	}
+	uint64_t _get_hash(const char *kmer) const {
+		uint k = strlen(kmer);
+		char ckmer[k + 1];
+		_canonical(kmer, ckmer, k);
+		std::array<uint64_t, 2> hashes;
+		MurmurHash3_x64_128(ckmer, k, 0, reinterpret_cast<void *>(&hashes));
+		return hashes[0];
+	}
+	
+	uint64_t _get_hash(const std::string& kmer) const {
+		std::string ckmer = _canonical(kmer);
+		std::array<uint64_t, 2> hashes;
+		MurmurHash3_x64_128(&ckmer.at(0), (uint)ckmer.size(), 0, reinterpret_cast<void *>(&hashes));
+		return hashes[0];		
+   }
 public:
-  BF(const size_t size) : _mode(false), _bf(size, 0) { _size = size; }
-  ~BF() {}
+	friend void swap(BF& first, BF& second) {
+		using std::swap;
+		swap(first._mode, second._mode);
+		swap(first._size, second._size);
+		swap(first._bf, second._bf);
+		swap(first._brank, second._brank);
+		swap(first._counts, second._counts);
+		swap(first._times, second._times);
+	}
+	BF()  = default;
+	explicit BF(const size_t size) : _mode(false), _bf(size, 0) { _size = size; }
+	BF(const BF& other) : _mode(other._mode), _size(other._size), _bf(other._bf), _brank(other._brank),
+						_counts(other._counts), _times(other._times) {
+	  std::cerr<<"bf copy constr"<<std::endl;
+	}
+	/*BF(BF&& other) :_mode(std::move(other._mode)), _size(std::move(other._size)),
+					_bf(std::move(other._bf)), _brank(std::move(other._brank)),
+					_counts(std::move(other._counts)), _times(std::move(other._times)) {
+	  std::cout<<"bf move constr"<<std::endl;
+	}
+	*/
+	BF(BF&& other) :BF() {
+		swap(*this, other);
+		std::cerr<<"bf move constr"<<std::endl;
+	}
 
-  void add_key(const char *kmer) {
+	BF& operator=(BF other) {
+		swap(*this, other);
+		return *this;
+	}
+	
+	~BF() = default;
+
+  void add_key(const char *kmer)  {
     uint64_t hash = _get_hash(kmer);
     _bf[hash % _size] = 1;
   }
+	//#pragma omp declare simd
+	void add_key(const std::string& kmer) noexcept {
+		uint64_t hash = _get_hash(kmer);
+		_bf[hash % _size] = 1;
+	}
+	void add_key(const std::string& kmer, tbb::spin_mutex& mtx){
+		uint64_t hash = _get_hash(kmer);
+		tbb::spin_mutex::scoped_lock lock(mtx);
+		_bf[hash % _size] = 1;
+	}
 
   void add_refkey(const char *kmer) {
     uint64_t hash = _get_hash(kmer);
@@ -89,6 +150,11 @@ public:
     uint64_t hash = _get_hash(kmer);
     return _bf[hash % _size];
   }
+	//	#pragma omp declare simd
+	bool test_key(const std::string& kmer)  const noexcept{
+		uint64_t hash = _get_hash(kmer);
+		return _bf[hash % _size];
+	}
 
   int get_times(const char *kmer) const {
     uint64_t hash = _get_hash(kmer);
@@ -103,6 +169,9 @@ public:
     _counts = int_vector<8>(_brank(_size), 0, 8);
     _times = int_vector<8>(_brank(_size), 0, 8);
   }
+	void read_mode() {
+		_mode = true;
+	}
 
   bool increment(const char *kmer, const uint32 counter) {
     if (!_mode)
@@ -143,9 +212,10 @@ public:
   }
 
 private:
-  BF() {}
-  const BF &operator=(const BF &other) { return *this; }
-  const BF &operator=(const BF &&other) { return *this; }
+  // const BF &operator=(const BF &other) { return *this; }
+  //const BF &operator=(const BF &&other) { return *this; }
+	// BF &operator=(const BF &other) {return *this;}
+	//BF &operator=(const BF &&other) {return *this;}
 
   bool _mode; // false = write, true = read
   size_t _size;

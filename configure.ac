@@ -1,0 +1,6 @@
+AC_INIT([malva-geno], 0.1)
+AM_INIT_AUTOMAKE
+AC_PROG_CC
+AC_PROG_CXX([icc gcc])
+AC_CONFIG_FILES([Makefile])
+AC_OUTPUT

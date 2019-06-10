@@ -23,6 +23,7 @@
 #define _MALVAARGUMENT_PARSER_HPP_
 
 #include <sstream>
+#include <iostream>
 
 #include <getopt.h>
 
