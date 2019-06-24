@@ -1,16 +1,19 @@
-CXX = $(shell icc -v 2>&1 >/dev/null | grep -o "icc")
-CXXFLAGS = -Wall -g -std=c++14 -O3 -fopenmp 
+CXX = $(shell icpc -v 2>&1 >/dev/null | grep -o "icpc")
+CXXFLAGS = -Wall -g -std=c++17 -O3 
 
-ifeq ($(CXX), icc)
- CXXFLAGS += -xCORE_AVX2
+ifeq ($(CXX), icpc)
+ CXXFLAGS += -qopenmp -axCORE_AVX2 -parallel-source-info=2
 else
- #CXX = clang++
-CXX = g++
+ CXX = g++
+CXXFLAGS += -fopenmp -msse4.2
+#CXX = g++
 endif
 
-INCLUDES = -I. -I./sdsl-lite/build/include -I./htslib/htslib -I./KMC
+INCLUDES = -I. -I./sdsl-lite/build/include -I./htslib/htslib -I./KMC -I/opt/intel/advisor_2019.3.0.591490/include
+#INCLUDES = -I/home/fabio/include -I./htslib/htslib -I./KMC
 LDFLAGS = -L./sdsl-lite/build/lib -L./sdsl-lite/build/external/libdivsufsort/lib -L./htslib/
-LDLIBS = -lhts -lz -lsdsl -ldivsufsort -ldivsufsort64 -ltbb
+#LDFLAGS = -L/home/fabio/lib -L./htslib/
+LDLIBS = -lhts -lz -lsdsl -ldivsufsort -ldivsufsort64 -ltbb -ldl
 OBJS = main_exp.o MurmurHash3.o ./KMC/kmc_api/kmc_file.o ./KMC/kmc_api/kmer_api.o ./KMC/kmc_api/mmer.o
 PROG = malva-geno
 
