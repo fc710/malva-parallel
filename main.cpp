@@ -65,8 +65,14 @@ void pelapsed(const std::string &s , double start_t) {
               << now_t -start_t << "s" << std::endl;
 }
 
+char ascii_toupper(char c) {
+    return ('a' <= c && c <= 'z') ? c^0x20 : c;
+}
+
 KSEQ_INIT(gzFile, gzread)
- 
+
+
+
 std::unordered_map<std::string, std::string> read_references()
 {
     gzFile fasta_in = gzopen(opt::fasta_path.c_str(), "r");
@@ -81,6 +87,10 @@ std::unordered_map<std::string, std::string> read_references()
         }
         std::string seq(reference->seq.s);
         std::transform(seq.begin(), seq.end(), seq.begin(), ::toupper);
+        /*#pragma omp simd
+        for(long unsigned int i= 0; i < seq.size(); ++i )
+            seq[i] = ascii_toupper(seq[i]);
+        */
         refs[id] = seq;
     }
 
@@ -110,35 +120,44 @@ std::vector<Variant> read_variants()
  **/
 void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers)
 {
-    long unsigned int size = kmers.size();
-    for (long unsigned int i = 0; i < size; ++i)
+    omp_set_nested(1);
+    #pragma omp parallel proc_bind(close) if(omp_get_active_level() < 1)
     {
-        // For each variant
-        const auto &v = kmers.at(i);
-        for (const auto &p : v)
-            // For each allele of the variant/
-            for (const auto &Ks : p.second)
-                // For each list of kmers of the allele
-                for (const auto &kmer : Ks)
-                    // For each kmer in the kmer list
-                    if (p.first == 0)
-                        ref_bf.add_key(kmer);
-                    else
-                        bf.add_key(kmer);
+        #pragma omp single nowait
+        {
+            for (const auto& v : kmers)
+                // For each variant
+                for (const auto &p : v.second)
+                    // For each allele of the variant/
+                    for (const auto &Ks : p.second)
+                        // For each list of kmers of the allele
+                        for (const auto &kmer : Ks)
+                        {
+                            // For each kmer in the kmer list
+                            #pragma omp task if(omp_in_parallel())
+                            {
+                                if (p.first == 0)
+                                    ref_bf.add_key(kmer);
+                                else
+                                    bf.add_key(kmer);
+                            }
+                        }
+            }
+        }
     }
-}
-// potential data race detected
+// potential data race/memory leak valgrind??
 void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
                        const std::unordered_map<std::string, std::string> &refs)
 {
-
-    //	#pragma omp parallel
+    omp_set_nested(1);
+    #pragma omp parallel proc_bind(close)
     {
-        //		#pragma omp single
+        #pragma omp single nowait
         {
+            std::cerr<<"threads in nested region: "<<omp_get_num_threads()<<std::endl;
             std::string last_seq_name = "";
             VB vb(opt::k, opt::error_rate);
-            for (decltype(vs.size()) i = 0; i < vs.size(); ++i)
+            for (long unsigned int i = 0; i < vs.size(); ++i)
             {
                 Variant v = vs.at(i);
                 if (last_seq_name.size() == 0)
@@ -153,19 +172,20 @@ void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
                 }
                 if (!vb.is_near_to_last(v) || last_seq_name != v.seq_name)
                 {
-                    std::string ref = refs.at(last_seq_name);
-                    //	#pragma omp task firstprivate(vb, last_seq_name)
-                    //{
-                    VK_GROUP kmers = vb.extract_kmers(ref);
-                    add_kmers_to_bf(bf, ref_bf, kmers);
-                    //}
+                    #pragma omp task firstprivate(vb, last_seq_name)
+                    {
+                        std::string ref = refs.at(last_seq_name);
+                        VK_GROUP kmers = vb.extract_kmers(ref);
+                        add_kmers_to_bf(bf, ref_bf, kmers);
+                    }
                     vb.clear();
                     if (last_seq_name != v.seq_name)
                         last_seq_name = v.seq_name;
                 }
                 vb.add_variant(v);
             }
-            if (!vb.empty()) {
+            if (!vb.empty())
+            {
                 VK_GROUP kmers = vb.extract_kmers(refs.at(last_seq_name));
                 add_kmers_to_bf(bf, ref_bf, kmers);
             }
@@ -181,26 +201,24 @@ void populate_context_bf(const BF &bf, BF &context_bf,
         std::string reference = refs.at(used_seq_names[seq]);
         int pos = (opt::ref_k - opt::k) / 2;
         long unsigned int size = reference.size();
-        #pragma omp parallel
+        #pragma omp parallel proc_bind(spread)
         {
-        #pragma omp single
-            std::cerr<<"n thread "<<omp_get_num_threads()<<"\n"<<"used size "<<used_seq_names.size()<<"\n;";
-        #pragma omp for
-        for (long unsigned int p = opt::ref_k; p < size; ++p)
-        {
-            auto it0 = p - opt::ref_k;
-            auto it1 = p - opt::ref_k + pos;
-            // auto it02 = p;
-            //auto it12 = p - pos;
-            //if (bf.test_key(std::string_view(&reference[it1], &reference[it12])))
-            if(bf.test_key(std::string_view(&reference[it1], opt::k)))
+            #pragma omp for
+            for (long unsigned int p = opt::ref_k; p < size; ++p)
             {
-                context_bf.add_key(std::string_view(&reference[it0], opt::ref_k));
+                auto it0 = p - opt::ref_k;
+                auto it1 = p - opt::ref_k + pos;
+                // auto it02 = p;
+                //auto it12 = p - pos;
+                //if (bf.test_key(std::string_view(&reference[it1], &reference[it12])))
+                if(bf.test_key(std::string_view(&reference[it1], opt::k)))
+                    context_bf.add_key(std::string_view(&reference[it0], opt::ref_k));
+            
             }
-        }
         }
     }
 }
+    
 
 /**
  * Method to compute and store the coverages of the alleles of the
@@ -273,6 +291,30 @@ void print_cleaned_header()
     bcf_destroy(vcf_record);
     bcf_close(vcf);
 }
+void step2(CKMCFile& kmer_db, KMAP& ref_bf, BF& bf, const BF& context_bf)
+{
+    uint32 klen, mode, min_counter, pref_len, sign_len, min_c, counter;
+    uint64 tot_kmers, max_c;
+    kmer_db.Info(klen, mode, min_counter, pref_len,
+                 sign_len, min_c, max_c,tot_kmers);
+    CKmerAPI kmer_obj(klen);
+
+    char context[opt::ref_k + 1];
+
+    while (kmer_db.ReadNextKmer(kmer_obj, counter))
+    {
+        kmer_obj.to_string(context);
+        std::transform(context, context + opt::ref_k, context, ::toupper);
+        char kmer[opt::k + 1];
+        strncpy(kmer, context + ((opt::ref_k - opt::k) / 2), opt::k);
+        kmer[opt::k] = '\0';
+        ref_bf.increment(kmer, counter);
+        if (!context_bf.test_key(context))
+        {
+            bf.increment(kmer, counter);
+        }
+    }
+}
 void step3(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
            const std::unordered_map<std::string, std::string> &refs)
 {
@@ -341,20 +383,14 @@ int main(int argc, char *argv[])
     double t0, t1;
     // STEP 1: add VCF kmers to bloom filter
     t0 = omp_get_wtime();
-    #pragma omp parallel sections default(shared) lastprivate(used_seq_names)
+    #pragma omp parallel sections num_threads(4) default(shared) lastprivate(used_seq_names) proc_bind(spread)
     {
         #pragma omp section
-        {
             refs = read_references();
-        }
         #pragma omp section
-        {
             bf = BF(opt::bf_size);
-        }
         #pragma omp section
-        {
             context_bf = BF(opt::bf_size);
-        }
         #pragma omp section 
         {
             vs = read_variants();
@@ -362,16 +398,12 @@ int main(int argc, char *argv[])
             for (auto v : vs){
                 // std::cerr<<"v name "<<v.seq_name<<std::endl;
                 if(used_seq_names.empty())
-                {
                     //  std::cerr<<"u size "<<used_seq_names.size()<<std::endl;
                     used_seq_names.push_back(v.seq_name);
-                }
                 else
-                {
                     //std::cerr<<"back "<<used_seq_names.back()<<std::endl;
                     if(used_seq_names.back() != v.seq_name)
                         used_seq_names.push_back(v.seq_name);
-                }
                 
             }
             //sort(used_seq_names.begin(), used_seq_names.end());
@@ -380,9 +412,13 @@ int main(int argc, char *argv[])
         }
     }
     t1 = omp_get_wtime();
-    std::cerr<<"section took "<<t1-t0<<std::endl;
-    //#pragma omp task
+    std::cerr<<"Preprocessing done in: "<<t1-t0<<"s\n";
+
     populate_bf_refbf(vs, bf, ref_bf, refs);
+
+    t0 = omp_get_wtime();
+    
+    std::cerr<<"Bf done in: "<<t0-t1<<"s\n";
     pelapsed("BF creation complete", start_t);
     
     bf_rank = std::async(std::launch::async, [&]() { bf.switch_mode(); });   
@@ -390,7 +426,7 @@ int main(int argc, char *argv[])
     t0 = omp_get_wtime();
     populate_context_bf(bf, context_bf, refs, used_seq_names);
     t1 = omp_get_wtime();
-    std::cerr << "ctx creation took: " << t1 - t0 << std::endl;
+    std::cerr << "Context_bf done in: " << t1 - t0 <<"s\n";
 
     /*std::ofstream file;
       file.open("strings2.txt");
@@ -400,61 +436,29 @@ int main(int argc, char *argv[])
     */
     // context_bf.switch_mode();
     context_bf.read_mode();
+    t0 = omp_get_wtime();
     std::cerr<<"Waiting...\n";
     bf_rank.wait();
+    t1 = omp_get_wtime();
+    std::cerr<<"Waited for "<<t1 - t0 <<"s\n";
     pelapsed("Reference BF creation complete", start_t);
             
     // STEP 2: test variants present in read sample
-    double t8 = omp_get_wtime();
-    uint32 klen, mode, min_counter, pref_len, sign_len, min_c, counter;
-    uint64 tot_kmers, max_c;
-    kmer_db.Info(klen, mode, min_counter, pref_len,
-                 sign_len, min_c, max_c,tot_kmers);
-    CKmerAPI kmer_obj(klen);
-
-    char context[opt::ref_k + 1];
-
-    while (kmer_db.ReadNextKmer(kmer_obj, counter))
-    {
-        kmer_obj.to_string(context);
-        std::transform(context, context + opt::ref_k, context, ::toupper);
-        char kmer[opt::k + 1];
-        strncpy(kmer, context + ((opt::ref_k - opt::k) / 2), opt::k);
-        kmer[opt::k] = '\0';
-        ref_bf.increment(kmer, counter);
-        if (!context_bf.test_key(context))
-        {
-            bf.increment(kmer, counter);
-        }
-    }
-    double t9 = omp_get_wtime();
-    std::cerr << "weights creation in " << t9 - t8 << std::endl;
+    t0 = omp_get_wtime();
+    step2(kmer_db, ref_bf, bf, context_bf);
+    t1 = omp_get_wtime();
+    std::cerr << "Weights done in " << t1 - t0 <<"s\n";
     pelapsed("BF weights created", start_t);
 
     // STEP 3: check if variants in vcf are covered enough
     print_cleaned_header();
     step3(vs, bf, ref_bf, refs);
 
-    double t10 = omp_get_wtime();
-    std::cerr << "last step took " << t10 - t9 << std::endl;
+    t0 = omp_get_wtime();
+    std::cerr << "Print to cout done in " << t0 - t1 <<"s\n";
 
     pelapsed("Execution completed", start_t);
 
     return 0;
 }
-/*		tbb::parallel_for(tbb::blocked_range<int>(opt::ref_k, size),
-                [&](const tbb::blocked_range<int>& r){
-                int b =r.begin();
-                int e =r.end();
-                for (int p = b,it0 = p - opt::ref_k,it1 = p - opt::ref_k + pos,
-                it02 = p ,it12 = p - pos; p != e; ++p,++it0,++it1,++it02,++it12)
-                {
 
-                if(bf.test_key(std::string(&reference[it1], &reference[it12]))){
-                context_bf.add_key(std::string(&reference[it0],
-                &reference[it02]));
-                }
-                }
-                }
-                );
-*/
