@@ -50,7 +50,8 @@ struct Variant {
   std::vector<float> coverages;               // Allele coverages (computed from input sample)
   std::vector<GT> computed_gts;               // Computed genotypes
 
-  Variant() {}
+	Variant() = default;
+	~Variant() = default;
 
   Variant(bcf_hdr_t *vcf_header, bcf1_t *vcf_record, const std::string &pop) {
     seq_name = bcf_hdr_id2name(vcf_header, vcf_record->rid);

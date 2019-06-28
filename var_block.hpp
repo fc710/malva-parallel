@@ -52,14 +52,10 @@ private: // attributes
 
 public:
 	VB() = default;
-  VB(const int &_k, const float _error_rate) {
-    k = _k;
-    error_rate = _error_rate;
-  }
+	VB(int _k, const float _error_rate) :k(_k), error_rate(_error_rate) {}
 	VB(const VB& other) = default;
 	VB& operator=(VB& other) = default;
-	VB& operator=(VB&& other) = default;
-  ~VB() {}
+	~VB() = default;
 
   bool is_near_to_last(const Variant &v) {
     return are_near(variants.back(), v, k);
