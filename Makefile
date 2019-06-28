@@ -1,16 +1,16 @@
 COMPILER1 = $(shell which icpc | grep -o "icpc")
 COMPILER2 = $(shell which clang++ | grep -o "clang++")
-CXXFLAGS = -Wall -g -std=c++17 -O3 
-
+CXXFLAGS = -Wall -g -std=c++17 -O3
 ifeq ($(COMPILER1), icpc)
 	CXX = icpc
-	CXXFLAGS += -qopenmp -axCORE_AVX2 -parallel-source-info=2
+	CXXFLAGS += -qopenmp -axcore-avx2 -parallel-source-info=2
 else ifeq ($(COMPILER2), clang++)
 	CXX = clang++
-	CXXFLAGS += -fopenmp -msse4.2
+	CXXFLAGS += -fopenmp -axcore-avx2
 else
 	CXX = g++
 	CXXFLAGS += -fopenmp -msse4.2
+
 endif
 
 INCLUDES = -I. -I./sdsl-lite/build/include -I./htslib/htslib -I./KMC
