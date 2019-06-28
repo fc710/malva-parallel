@@ -26,7 +26,6 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cstring>
-#include "tbb/spin_mutex.h"
 // static const char RCN[128] = {
 //     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   //  0
 //     0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 10
@@ -49,7 +48,7 @@ struct KMAP {
 
   KMAP() {}
 
-	static char _compl(const char &c) { return opt::RCN[c]; }
+	static char _compl(const char &c) { return opt::RCN[(int)c]; }
 
   std::string canonical(const char* kmer) {
     uint k = strlen(kmer);
@@ -71,6 +70,18 @@ struct KMAP {
 		else
 			return ckmer;	
 	}
+	std::string _reverse_cmpl(std::string_view kmer) const
+	{
+		std::string ckmer(kmer);
+		int size = ckmer.size();
+        #pragma ivdep
+		for(int i = 0; i < size; ++i)
+				ckmer[i] = opt::RCN[(int)ckmer[i]];
+		std::reverse(ckmer.begin(), ckmer.end());
+			return ckmer;
+		
+	}
+
 
 
   bool test_key(const char* kmer) {
@@ -85,14 +96,17 @@ struct KMAP {
     std::string ckmer = canonical(kmer);
     kmers[ckmer] = 0;
   }
-	void add_key(const std::string& kmer, tbb::spin_mutex &mtx){
-		std::string ckmer = canonical(kmer);
-		tbb::spin_mutex::scoped_lock lock(mtx);
-		kmers[ckmer] = 0;		
+	void add_key(std::string_view kmer){
+		std::string ckmer = _reverse_cmpl(kmer);
+		if(kmer.compare(ckmer) > 0)
+			kmer = ckmer;
+		#pragma omp critical 
+		kmers[(std::string)kmer] = 0;		
 	}
-	void add_key(const std::string& kmer){
+
+	void add_key(std::string kmer) {
 		std::string ckmer = canonical(kmer);
-		kmers[ckmer] = 0;		
+		kmers[ckmer] = 0;
 	}
 
 
