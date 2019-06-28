@@ -21,7 +21,7 @@
  **/
 
 #include <algorithm>
-#include <chrono>
+//#include <chrono>
 //#include <fstream>
 #include <iostream>
 #include <utility>
@@ -57,9 +57,7 @@
 #include "kmap.hpp"
 #include "var_block.hpp"
 
-//auto start_t = std::chrono::high_resolution_clock::now();
 void pelapsed(const std::string &s , double start_t) {
-    //auto now_t = std::chrono::high_resolution_clock::now();
     auto now_t = omp_get_wtime();
     std::cerr << "[malva-geno/" << s << "] Time elapsed "
               << now_t -start_t << "s" << std::endl;
@@ -77,7 +75,6 @@ std::unordered_map<std::string, std::string> read_references()
 {
     gzFile fasta_in = gzopen(opt::fasta_path.c_str(), "r");
     kseq_t *reference = kseq_init(fasta_in);
-    // int l;
     std::unordered_map<std::string, std::string> refs;
     while (kseq_read(reference) >= 0)
     {
@@ -103,12 +100,19 @@ std::vector<Variant> read_variants()
 {
     htsFile *vcf = bcf_open(opt::vcf_path.c_str(), "r");
     bcf_hdr_t *vcf_header = bcf_hdr_read(vcf);
+    int is_file_flag = 0;
+    if(opt::samples != "-")
+        is_file_flag = 1;
+    int set_samples_code = bcf_hdr_set_samples(vcf_header, opt::samples.c_str(), is_file_flag);
+    if(set_samples_code != 0) {
+        throw "ERROR: VCF samples subset invalid code\n";
+    }
     bcf1_t *vcf_record = bcf_init();
     std::vector<Variant> vs;
     while (bcf_read(vcf, vcf_header, vcf_record) == 0)
     {
         bcf_unpack(vcf_record, BCF_UN_STR);
-        vs.emplace_back(vcf_header, vcf_record, opt::pop);
+        vs.emplace_back(vcf_header, vcf_record, opt::freq_key);
     }
     bcf_hdr_destroy(vcf_header);
     bcf_destroy(vcf_record);

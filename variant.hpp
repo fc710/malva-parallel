@@ -45,7 +45,6 @@ struct Variant {
   int max_size;                               // Length of the longest string (ref and alts)
   bool has_alts = true;                       // false if no alternatives, i.e. only <CN>
   bool is_present = true;                     // false if no sample has this variant
-  std::vector<int> positive_samples;          // Indices of samples for which genotype is different from 00
   std::vector<float> frequencies;             // Allele frequency in the considered population
   std::vector<float> coverages;               // Allele coverages (computed from input sample)
   std::vector<GT> computed_gts;               // Computed genotypes
@@ -53,7 +52,7 @@ struct Variant {
 	Variant() = default;
 	~Variant() = default;
 
-  Variant(bcf_hdr_t *vcf_header, bcf1_t *vcf_record, const std::string &pop) {
+  Variant(bcf_hdr_t *vcf_header, bcf1_t *vcf_record, const std::string &freq_key) {
     seq_name = bcf_hdr_id2name(vcf_header, vcf_record->rid);
     ref_pos = vcf_record->pos;
     idx = vcf_record->d.id;
@@ -77,9 +76,9 @@ struct Variant {
     set_sizes();
     if (has_alts) {
       // Populate frequencies vector
-      extract_frequencies(vcf_header, vcf_record, pop);
+      extract_frequencies(vcf_header, vcf_record, freq_key);
       if (is_present)
-        // Populate genotypes, phasing, and positive_samples
+        // Populate genotypes and phasing
         extract_genotypes(vcf_header, vcf_record);
     }
   }
@@ -103,12 +102,10 @@ struct Variant {
   }
 
   void extract_frequencies(bcf_hdr_t *vcf_header, bcf1_t *vcf_record,
-                           const std::string &pop) {
+                           const std::string &freq_key) {
     int ndst = 0;
     float *altall_freqs = NULL;
-    // !!! Here I'm assuming a VCF from the 1000genomes !!!
-    std::string info_field = pop + "_AF";
-    bcf_get_info_float(vcf_header, vcf_record, info_field.c_str(),
+    bcf_get_info_float(vcf_header, vcf_record, freq_key.c_str(),
                        &altall_freqs, &ndst);
 
     frequencies.push_back(0); // First element is reserved for reference allele
@@ -149,6 +146,7 @@ struct Variant {
       if (curr_gt[1] == bcf_int32_vector_end) {
         all_1 = bcf_gt_allele(curr_gt[0]);
         all_2 = bcf_gt_allele(curr_gt[0]);
+		is_phased = true;
       } else {
         all_1 = bcf_gt_allele(curr_gt[0]);
         all_2 = bcf_gt_allele(curr_gt[1]);
@@ -156,9 +154,9 @@ struct Variant {
           // this works, but I'm not 100% sure it's sufficient
           is_phased = true;
       }
+	  if(all_1 < 0) all_1 = 0;
+      if(all_2 < 0) all_2 = 0;
       genotypes.push_back(std::make_pair(all_1, all_2));
-      if (all_1 > 0 or all_2 > 0)
-        positive_samples.push_back(i);
       phasing.push_back(is_phased);
     }
     free(gt_arr);
