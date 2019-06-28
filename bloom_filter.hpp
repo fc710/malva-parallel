@@ -67,22 +67,13 @@ private:
       memmove(ckmer, kmer, k);
   }
 
-	std::string _canonical(std::string_view kmer) const {
-		//std::string _c(kmer);
+	std::string _reverse_cmpl(std::string_view kmer) const {
 		std::string ckmer(kmer);
-		//std::transform(ckmer.begin(), ckmer.end(), ckmer.begin(), _compl);
 		int size = ckmer.size();
-//#pragma code_align 32
-//#pragma omp simd
         #pragma ivdep
 		for(int i = 0; i < size; ++i)
 				ckmer[i] = opt::RCN[(int)ckmer[i]];
-//	ckmer[i] = _compl(ckmer[i]);
-			
 		std::reverse(ckmer.begin(), ckmer.end());
-		//if(kmer.compare(ckmer) < 0)
-		//	return kmer;
-		//else
 			return ckmer;
 		
 	}
@@ -96,7 +87,7 @@ private:
 	}
 	
 	uint64_t _get_hash(std::string_view kmer) const {
-		std::string ckmer = _canonical(kmer);
+		std::string ckmer = _reverse_cmpl(kmer);
 		std::array<uint64_t, 2> hashes;
 		if(kmer.compare(ckmer) < 0)
 				MurmurHash3_x64_128(&kmer.at(0), (uint)kmer.size(), 0, reinterpret_cast<void *>(&hashes));
@@ -142,9 +133,10 @@ public:
     uint64_t hash = _get_hash(kmer);
     _bf[hash % _size] = 1;
   }
-	//#pragma omp declare target
-	void add_key(std::string_view kmer) noexcept {
+	//#pragma omp declare simd
+	void add_key(std::string_view kmer) {
 		uint64_t hash = _get_hash(kmer);
+		#pragma omp critical
 		_bf[hash % _size] = 1;
 	}
 /*	void add_key(const std::string& kmer, tbb::spin_mutex& mtx){
@@ -162,7 +154,7 @@ public:
     uint64_t hash = _get_hash(kmer);
     return _bf[hash % _size];
   }
-	//#pragma omp declare target
+	//#pragma omp declare simd
 	bool test_key(std::string_view kmer)  const {
 		uint64_t hash = _get_hash(kmer);
 		return _bf[hash % _size];
@@ -177,7 +169,7 @@ public:
 
   void switch_mode() {
     _mode = true;
-    _brank = rank_support_v5<1>(&_bf);
+    _brank = rank_support_v<1>(&_bf);
     _counts = int_vector<8>(_brank(_size), 0, 8);
     _times = int_vector<8>(_brank(_size), 0, 8);
   }
@@ -232,7 +224,7 @@ private:
   bool _mode; // false = write, true = read
   size_t _size;
   bit_vector _bf;
-  rank_support_v5<1> _brank;
+  rank_support_v<1> _brank;
   int_vector<8> _counts;
   int_vector<8> _times;
 };
