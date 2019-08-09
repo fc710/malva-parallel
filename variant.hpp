@@ -50,6 +50,7 @@ struct Variant {
   std::vector<GT> computed_gts;               // Computed genotypes
 
 	Variant() = default;
+	Variant(const Variant& other) = default;
 	~Variant() = default;
 
   Variant(bcf_hdr_t *vcf_header, bcf1_t *vcf_record, const std::string &freq_key) {

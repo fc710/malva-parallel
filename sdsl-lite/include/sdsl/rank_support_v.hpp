@@ -85,7 +85,59 @@ public:
     uint64_t carry = trait_type::init_carry();
     uint64_t sum = trait_type::args_in_the_word(*data, carry);
     uint64_t second_level_cnt = 0;
-    for (i = 1; i < (m_v->capacity() >> 6); ++i) {
+	//auto cap = (m_v->capacity() >> 6);
+	#pragma omp parallel for private(i, j, sum, second_level_cnt) firstprivate(data) //schedule(static, 1)
+	for(i = 8 ; i < (m_v->capacity() >> 6); i+=8) {
+		j =  i/4;
+		sum = trait_type::args_in_the_word(*(data+i-8), carry);
+		second_level_cnt = 0 ;
+		for(size_type p = i - 7; p < i; ++p){
+			second_level_cnt |= sum << (63 - 9 * (p & 0x7));
+			sum += trait_type::args_in_the_word(*(data+p), carry);
+		}
+		m_basic_block[j - 1] = second_level_cnt;
+		m_basic_block[j] = sum;
+		
+	}
+	i = 0;
+	j = 0;
+	for(i = 8; i < (m_v->capacity() >> 6); i+=8){
+		j += 2;
+		m_basic_block[j] += m_basic_block[j - 2];
+	}
+
+	i = ((m_v->capacity() >> 6) / 8) * 8;
+	/*std::cerr<<"mv cap >> 6 :" << (m_v->capacity() >> 6)<<std::endl;
+	std::cerr<<"mv cap >> :" << (m_v->capacity())<<std::endl;
+	std::cerr<<"mv size : " << (m_v->size())<<std::endl;
+	std::cerr<<"mbb size : " << (m_basic_block.size())<<std::endl;
+	std::cerr<<"mbb cap >> 6: " << (m_basic_block.capacity() >> 6)<<std::endl;
+	std::cerr<<"mv cap >> 8: " << (m_v->capacity() >> 8)<<std::endl;
+	std::cerr<<"mbb cap: " << (m_basic_block.capacity())<<std::endl;
+	std::cerr<<"i :" << i<<std::endl;
+	std::cerr<<"j :" << j<<std::endl;
+	*/
+	second_level_cnt = 0;
+	if(i == (m_v->capacity() >> 6 ))
+		i-=8;
+	sum = trait_type::args_in_the_word(*(data+i), carry);
+	if(!(i & 0x7))
+		++i;
+	for (; i < (m_v->capacity() >> 6); ++i) {
+      if (!(i & 0x7)) { // if i%8==0
+        j += 2;
+        m_basic_block[j - 1] = second_level_cnt;
+        m_basic_block[j] = m_basic_block[j - 2] + sum;
+        second_level_cnt = sum = 0;
+      } else {
+        second_level_cnt |=
+            sum << (63 - 9 * (i & 0x7)); //  54, 45, 36, 27, 18, 9, 0
+      }
+      //sum += trait_type::args_in_the_word(*(++data), carry);
+	  sum += trait_type::args_in_the_word(*(data+i), carry);
+    }
+
+    /*for (i = 1; i < (m_v->capacity() >> 6); ++i) {
       if (!(i & 0x7)) { // if i%8==0
         j += 2;
         m_basic_block[j - 1] = second_level_cnt;
@@ -96,7 +148,9 @@ public:
             sum << (63 - 9 * (i & 0x7)); //  54, 45, 36, 27, 18, 9, 0
       }
       sum += trait_type::args_in_the_word(*(++data), carry);
+	  //sum += trait_type::args_in_the_word(*(data+i), carry);
     }
+	*/
     if (i & 0x7) { // if i%8 != 0
       second_level_cnt |= sum << (63 - 9 * (i & 0x7));
       m_basic_block[j + 1] = second_level_cnt;
@@ -106,6 +160,17 @@ public:
       m_basic_block[j] = m_basic_block[j - 2] + sum;
       m_basic_block[j + 1] = 0;
     }
+	/*long last = -1;
+	for(int h = 0; h < (m_basic_block.size()) ; ++h)
+	{
+		if(m_basic_block[h] != 0 && m_basic_block[h] != last){
+			std::cerr<<"m_block "<<h<<": "<<m_basic_block[h]<<std::endl;
+			last = m_basic_block[h];
+		}
+	}
+	  std::cerr<<"past print"<<std::endl;
+	*/
+
   }
 
   rank_support_v(const rank_support_v &) = default;

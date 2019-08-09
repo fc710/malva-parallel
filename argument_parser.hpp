@@ -45,8 +45,8 @@ static const char *USAGE_MESSAGE =
   "\n";
 
 namespace opt {
-static uint k = 35;
-static uint ref_k = 43;
+static int k = 35;
+static int ref_k = 43;
 static float error_rate = 0.001;
 static std::string samples = "-";
 static std::string freq_key = "AF";

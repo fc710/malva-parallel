@@ -33,31 +33,37 @@
 #include "kmc_api/kmc_file.h"
 
 // using namespace std;
+
 using namespace sdsl;
 
-namespace opt{
-	const char RCN[128] = {
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   //  0
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 10
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 20
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 30
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 40
-    0,   0,   0, 0,   0,   0,   0,   0,   0,   0,   // 50
-    0,   0,   0, 0,   0,   'T', 0,   'G', 0,   0,   // 60
-    0,   'C', 0, 0,   0,   0,   0,   0,   'N', 0,   // 70
-    0,   0,   0, 0,   'A', 0,   0,   0,   0,   0,   // 80
-    0,   0,   0, 0,   0,   0,   0,   'T', 0,   'G', // 90
-    0,   0,   0, 'G', 0,   0,   0,   0,   0,   0,   // 100
-    'N', 0,   0, 0,   0,   0,   'A', 0,   0,   0,   // 110
-    0,   0,   0, 0,   0,   0,   0,   0              // 120
-	};
-}
+const char RCN[128] =
+{
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, //  0
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, // 10
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, // 20
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, // 30
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, // 40
+	0,   0,   0, 0,   0,   0,   0,   0,   0,   0, // 50
+	0,   0,   0, 0,   0,   'T', 0,   'G', 0,   0, // 60
+	0,   'C', 0, 0,   0,   0,   0,   0,   'N', 0, // 70
+	0,   0,   0, 0,   'A', 0,   0,   0,   0,   0, // 80
+	0,   0,   0, 0,   0,   0,   0,   'T', 0,   'G', // 90
+	0,   0,   0, 'G', 0,   0,   0,   0,   0,   0, // 100
+	'N', 0,   0, 0,   0,   0,   'A', 0,   0,   0, // 110
+	0,   0,   0, 0,   0,   0,   0,   0 // 120
+};
 
 class BF {
 
 private:
-#pragma omp declare simd
-		static inline char _compl(char c) { return opt::RCN[(int)c]; }
+	bool _mode; // false = write, true = read
+	size_t _size;
+	bit_vector _bf;
+	rank_support_v<1> _brank;
+	int_vector<8> _counts;
+	int_vector<8> _times;
+
+	static inline char _compl(char c) { return RCN[(int)c]; }
 
   void _canonical(const char *kmer, char *ckmer, const int &k) const {
 	strcpy(ckmer, kmer);
@@ -66,17 +72,29 @@ private:
     if (strcmp(kmer, ckmer) < 0)
       memmove(ckmer, kmer, k);
   }
-
+  
 	std::string _reverse_cmpl(std::string_view kmer) const {
 		std::string ckmer(kmer);
 		int size = ckmer.size();
-        #pragma ivdep
+        //#pragma ivdep
 		for(int i = 0; i < size; ++i)
-				ckmer[i] = opt::RCN[(int)ckmer[i]];
+				ckmer[i] = RCN[(int)ckmer[i]];
 		std::reverse(ckmer.begin(), ckmer.end());
 			return ckmer;
 		
 	}
+	std::string _reverse_cmpl(const std::string& kmer) const {
+		std::string ckmer(kmer);
+		int size = ckmer.size();
+        //#pragma ivdep
+		for(int i = 0; i < size; ++i)
+				ckmer[i] = RCN[(int)ckmer[i]];
+		std::reverse(ckmer.begin(), ckmer.end());
+			return ckmer;
+		
+	}
+
+	
 	uint64_t _get_hash(const char *kmer) const {
 		uint k = strlen(kmer);
 		char ckmer[k + 1];
@@ -85,7 +103,15 @@ private:
 		MurmurHash3_x64_128(ckmer, k, 0, reinterpret_cast<void *>(&hashes));
 		return hashes[0];
 	}
-	
+	uint64_t _get_hash(const std::string& kmer) const {
+		std::string ckmer = _reverse_cmpl(kmer);
+		std::array<uint64_t, 2> hashes;
+		if(kmer.compare(ckmer) < 0)
+				MurmurHash3_x64_128(&kmer.at(0), (uint)kmer.size(), 0, reinterpret_cast<void *>(&hashes));
+		else
+				MurmurHash3_x64_128(&ckmer.at(0), (uint)ckmer.size(), 0, reinterpret_cast<void *>(&hashes));
+		return hashes[0];		
+   }
 	uint64_t _get_hash(std::string_view kmer) const {
 		std::string ckmer = _reverse_cmpl(kmer);
 		std::array<uint64_t, 2> hashes;
@@ -95,6 +121,7 @@ private:
 				MurmurHash3_x64_128(&ckmer.at(0), (uint)ckmer.size(), 0, reinterpret_cast<void *>(&hashes));
 		return hashes[0];		
    }
+
 public:
 	friend void swap(BF& first, BF& second) {
 		using std::swap;
@@ -109,17 +136,10 @@ public:
 	explicit BF(const size_t size) : _mode(false), _bf(size, 0) { _size = size; }
 	BF(const BF& other) : _mode(other._mode), _size(other._size), _bf(other._bf), _brank(other._brank),
 						_counts(other._counts), _times(other._times) {
-	  std::cerr<<"bf copy constr"<<std::endl;
 	}
-	/*BF(BF&& other) :_mode(std::move(other._mode)), _size(std::move(other._size)),
-					_bf(std::move(other._bf)), _brank(std::move(other._brank)),
-					_counts(std::move(other._counts)), _times(std::move(other._times)) {
-	  std::cout<<"bf move constr"<<std::endl;
-	}
-	*/
+
 	BF(BF&& other) :BF() {
 		swap(*this, other);
-		std::cerr<<"bf move constr"<<std::endl;
 	}
 
 	BF& operator=(BF other) {
@@ -129,34 +149,35 @@ public:
 	
 	~BF() = default;
 
-  void add_key(const char *kmer)  {
+	void add_key(const char *kmer)  {
     uint64_t hash = _get_hash(kmer);
     _bf[hash % _size] = 1;
   }
-	//#pragma omp declare simd
 	void add_key(std::string_view kmer) {
 		uint64_t hash = _get_hash(kmer);
 		#pragma omp critical
 		_bf[hash % _size] = 1;
 	}
-/*	void add_key(const std::string& kmer, tbb::spin_mutex& mtx){
+	void add_key(std::string kmer) {
 		uint64_t hash = _get_hash(kmer);
-		tbb::spin_mutex::scoped_lock lock(mtx);
+		#pragma omp critical
 		_bf[hash % _size] = 1;
 	}
-*/
+
   void add_refkey(const char *kmer) {
     uint64_t hash = _get_hash(kmer);
     _bf[hash % _size] = 0;
   }
 
   bool test_key(const char *kmer) const {
-    uint64_t hash = _get_hash(kmer);
+	  uint64_t hash = _get_hash(kmer);
     return _bf[hash % _size];
   }
-	//#pragma omp declare simd
 	bool test_key(std::string_view kmer)  const {
 		uint64_t hash = _get_hash(kmer);
+		return _bf[hash % _size];
+	}
+	bool ttest(uint64_t hash) const {
 		return _bf[hash % _size];
 	}
 
@@ -215,18 +236,7 @@ public:
     return 0;
   }
 
-private:
-  // const BF &operator=(const BF &other) { return *this; }
-  //const BF &operator=(const BF &&other) { return *this; }
-	// BF &operator=(const BF &other) {return *this;}
-	//BF &operator=(const BF &&other) {return *this;}
-
-  bool _mode; // false = write, true = read
-  size_t _size;
-  bit_vector _bf;
-  rank_support_v<1> _brank;
-  int_vector<8> _counts;
-  int_vector<8> _times;
 };
+
 
 #endif

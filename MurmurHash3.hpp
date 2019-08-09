@@ -30,8 +30,10 @@ void MurmurHash3_x86_32  ( const void * key, int len, uint32_t seed, void * out 
 
 void MurmurHash3_x86_128 ( const void * key, int len, uint32_t seed, void * out );
 
+//#pragma acc routine
+#pragma omp declare target
 void MurmurHash3_x64_128 ( const void * key, int len, uint32_t seed, void * out );
-
+#pragma omp end declare target
 //-----------------------------------------------------------------------------
 
 #endif // _MURMURHASH3_H_

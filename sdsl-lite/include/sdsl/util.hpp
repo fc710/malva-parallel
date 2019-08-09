@@ -48,7 +48,8 @@
 #define SDSL_STR(x) #x
 #define SDSL_XSTR(s) SDSL_STR(s)
 
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
 #define SDSL_UNUSED __attribute__ ((unused))
 #include <sys/time.h>  // for struct timeval
 #include <sys/resource.h> // for struct rusage
@@ -466,7 +467,7 @@ void util::_set_zero_bits(t_int_vec& v)
     // TODO: replace by memset() but take care of size_t in the argument!
     *data = 0ULL;
 	typename t_int_vec::size_type size = (v.capacity()>>6);
-	#pragma omp parallel for simd
+	#pragma omp parallel for
     for (typename t_int_vec::size_type i=1; i < size; ++i) {
         *(data + i) = 0ULL;
     }

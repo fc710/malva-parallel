@@ -52,8 +52,11 @@ private: // attributes
 
 public:
 	VB() = default;
-	VB(int _k, const float _error_rate) :k(_k), error_rate(_error_rate) {}
-	VB(const VB& other) = default;
+	VB(int _k, float _error_rate) :k(_k), error_rate(_error_rate) {
+		variants.reserve(10);
+	}
+	VB(const VB& other): variants(other.variants), k(other.k), error_rate(other.error_rate),
+						 number_variants_out(other.number_variants_out){}
 	VB& operator=(VB& other) = default;
 	~VB() = default;
 
@@ -68,6 +71,8 @@ public:
 	}
 
 	Variant get_variant(const int &i) const { return variants[i]; }
+
+	int get_size() const { return variants.size();}
 
 	bool empty() { return variants.empty(); }
 

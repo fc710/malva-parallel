@@ -7,6 +7,7 @@
 
 #include "uintx_t.hpp"
 #include "util.hpp"
+#include "unistd.h"
 
 #include <map>
 #include <iostream>
@@ -21,7 +22,8 @@
 #include "config.hpp"
 #include <fcntl.h>
 
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
 // windows.h has min/max macro which causes problems when using std::min/max
 #define NOMINMAX 
 #include <windows.h>
@@ -216,7 +218,8 @@ typedef struct bfoot {
 #pragma pack(pop)
 
 
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+    #ifndef _MSC_VER
 class hugepage_allocator
 {
     private:
@@ -296,7 +299,8 @@ class memory_manager
     public:
         static uint64_t* alloc_mem(size_t size_in_bytes)
         {
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
             auto& m = the_manager();
             if (m.hugepages) {
                 return (uint64_t*)hugepage_allocator::the_allocator().mm_alloc(size_in_bytes);
@@ -306,7 +310,8 @@ class memory_manager
         }
         static void free_mem(uint64_t* ptr)
         {
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
             auto& m = the_manager();
             if (m.hugepages and hugepage_allocator::the_allocator().in_address_space(ptr)) {
                 hugepage_allocator::the_allocator().mm_free(ptr);
@@ -317,7 +322,8 @@ class memory_manager
         }
         static uint64_t* realloc_mem(uint64_t* ptr, size_t size)
         {
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
             auto& m = the_manager();
             if (m.hugepages and hugepage_allocator::the_allocator().in_address_space(ptr)) {
                 return (uint64_t*)hugepage_allocator::the_allocator().mm_realloc(ptr, size);
@@ -328,7 +334,8 @@ class memory_manager
     public:
         static void use_hugepages(size_t bytes = 0)
         {
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
             auto& m = the_manager();
             hugepage_allocator::the_allocator().init(bytes);
             m.hugepages = true;
@@ -384,7 +391,8 @@ class memory_manager
         }
 
         static int open_file_for_mmap(std::string& filename, std::ios_base::openmode mode) {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
             int fd = -1;
             if (!(mode&std::ios_base::out)) _sopen_s(&fd,filename.c_str(), _O_BINARY| _O_RDONLY, _SH_DENYNO, _S_IREAD);
             else _sopen_s(&fd, filename.c_str(), _O_BINARY | _O_RDWR, _SH_DENYNO, _S_IREAD | _S_IWRITE);
@@ -397,7 +405,8 @@ class memory_manager
         }
 
         static void* mmap_file(int fd,uint64_t file_size, std::ios_base::openmode mode) {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
             HANDLE fh = (HANDLE)_get_osfhandle(fd);
             if (fh == INVALID_HANDLE_VALUE) {
                 return nullptr;
@@ -430,7 +439,8 @@ class memory_manager
         }
 
         static int mem_unmap(void* addr,const uint64_t size) {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
             if (UnmapViewOfFile(addr)) return 0;
             return -1;
 #else
@@ -440,7 +450,8 @@ class memory_manager
         }
 
         static int close_file_for_mmap(int fd) {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
             return _close(fd);
 #else
             return close(fd);
@@ -449,7 +460,8 @@ class memory_manager
         }
 
         static int truncate_file_mmap(int fd,const uint64_t new_size) {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
             auto ret = _chsize_s(fd,new_size);
             if(ret != 0) ret = -1;
             return ret;

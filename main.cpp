@@ -35,14 +35,8 @@
 #include <math.h>
 #include <zlib.h>
 
-//#include "tbb/tbb.h"
-//#include "tbb/concurrent_queue.h"
-//#include "tbb/concurrent_unordered_map.h"
-//#include "tbb/concurrent_vector.h"
-//#include "tbb/parallel_for.h"
-//#include "tbb/pipeline.h"
-//#include "tbb/spin_mutex.h"
 #include <omp.h>
+//#include <openacc.h>
 
 #include <future>
 #include <utility>
@@ -57,19 +51,21 @@
 #include "kmap.hpp"
 #include "var_block.hpp"
 
+
+#include "MurmurHash3.hpp"
+
+
 void pelapsed(const std::string &s , double start_t) {
     auto now_t = omp_get_wtime();
     std::cerr << "[malva-geno/" << s << "] Time elapsed "
               << now_t -start_t << "s" << std::endl;
 }
 
-char ascii_toupper(char c) {
-    return ('a' <= c && c <= 'z') ? c^0x20 : c;
-}
-
 KSEQ_INIT(gzFile, gzread)
 
+extern const char RCN[128];
 
+//#pragma acc declare create(RCN)
 
 std::unordered_map<std::string, std::string> read_references()
 {
@@ -82,13 +78,9 @@ std::unordered_map<std::string, std::string> read_references()
         if (id.compare(0, 3, "chr") == 0) {
             id = id.substr(3);
         }
-        std::string seq(reference->seq.s);
-        std::transform(seq.begin(), seq.end(), seq.begin(), ::toupper);
-        /*#pragma omp simd
-        for(long unsigned int i= 0; i < seq.size(); ++i )
-            seq[i] = ascii_toupper(seq[i]);
-        */
-        refs[id] = seq;
+        //std::string seq(reference->seq.s);
+        //std::transform(std::execution::par_unseq, seq.begin(), seq.end(), seq.begin(), ::toupper);
+        refs[id] = reference->seq.s;
     }
 
     kseq_destroy(reference);
@@ -96,6 +88,12 @@ std::unordered_map<std::string, std::string> read_references()
     return refs;
 }
 
+void upper_sequence(std::string& seq)
+{
+    #pragma omp parallel for simd
+    for(long unsigned int i = 0; i < seq.size(); ++i)
+        seq[i] &= ~0x20;
+}
 std::vector<Variant> read_variants()
 {
     htsFile *vcf = bcf_open(opt::vcf_path.c_str(), "r");
@@ -124,10 +122,10 @@ std::vector<Variant> read_variants()
  **/
 void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers)
 {
-    omp_set_nested(1);
-    #pragma omp parallel proc_bind(close) if(omp_get_active_level() < 1)
+    //omp_set_nested(0);
+    //#pragma omp parallel if(omp_get_active_level() < 1)
     {
-        #pragma omp single nowait
+        //#pragma omp single nowait
         {
             for (const auto& v : kmers)
                 // For each variant
@@ -135,10 +133,10 @@ void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers)
                     // For each allele of the variant/
                     for (const auto &Ks : p.second)
                         // For each list of kmers of the allele
-                        for (const auto &kmer : Ks)
+                        for (const std::string& kmer : Ks)
                         {
                             // For each kmer in the kmer list
-                            #pragma omp task if(omp_in_parallel())
+                            //#pragma omp task //if(omp_in_parallel())
                             {
                                 if (p.first == 0)
                                     ref_bf.add_key(kmer);
@@ -150,17 +148,15 @@ void add_kmers_to_bf(BF &bf, KMAP &ref_bf, const VK_GROUP &kmers)
         }
     }
 // potential data race/memory leak valgrind??
-void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
+void compute_main_filters(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
                        const std::unordered_map<std::string, std::string> &refs)
 {
-    omp_set_nested(1);
-    #pragma omp parallel proc_bind(close)
+    std::string last_seq_name = "";
+    VB vb(opt::k, opt::error_rate);
+    #pragma omp parallel //proc_bind(close)
     {
-        #pragma omp single nowait
+        #pragma omp single 
         {
-            std::cerr<<"threads in nested region: "<<omp_get_num_threads()<<std::endl;
-            std::string last_seq_name = "";
-            VB vb(opt::k, opt::error_rate);
             for (long unsigned int i = 0; i < vs.size(); ++i)
             {
                 Variant v = vs.at(i);
@@ -176,8 +172,9 @@ void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
                 }
                 if (!vb.is_near_to_last(v) || last_seq_name != v.seq_name)
                 {
-                    #pragma omp task firstprivate(vb, last_seq_name)
-                    {
+                    //std::cerr<<"size notask "<<vb.get_size()<<std::endl;
+                    #pragma omp task firstprivate(vb, last_seq_name) untied
+                    { 
                         std::string ref = refs.at(last_seq_name);
                         VK_GROUP kmers = vb.extract_kmers(ref);
                         add_kmers_to_bf(bf, ref_bf, kmers);
@@ -197,32 +194,77 @@ void populate_bf_refbf(std::vector<Variant> &vs, BF &bf, KMAP &ref_bf,
     }
 }
 
-void populate_context_bf(const BF &bf, BF &context_bf,
+void compute_context_filter(const BF &bf, BF &context_bf,
                          const std::unordered_map<std::string, std::string> &refs,
                          const std::vector<std::string> &used_seq_names) {
+    omp_set_nested(1);
+    if(used_seq_names.size() == 0)
+        return;
     for (long unsigned int seq = 0; seq < used_seq_names.size(); ++seq)
     {
-        std::string reference = refs.at(used_seq_names[seq]);
+        long unsigned int size = refs.at(used_seq_names[seq]).size();
+        const char* ref = refs.at(used_seq_names[seq]).c_str();
         int pos = (opt::ref_k - opt::k) / 2;
-        long unsigned int size = reference.size();
-        #pragma omp parallel proc_bind(spread)
+        //#pragma omp parallel for proc_bind(spread)#pragma omp end declare target
+        //std::cerr<<"num devices: "<<omp_get_num_devices()<<std::endl;
+        uint64_t* cv = new uint64_t[size];
+        //#pragma acc parallel loop  independent gang copyin(ref[:size], pos) copyout(cv[:size])
+        #pragma omp target teams distribute parallel for map(to: ref[0:size], pos, RCN[0:128]) map(cv[0:size])
+        for (long unsigned int p = opt::ref_k; p < size; ++p)
         {
-            #pragma omp for
-            for (long unsigned int p = opt::ref_k; p < size; ++p)
-            {
-                auto it0 = p - opt::ref_k;
-                auto it1 = p - opt::ref_k + pos;
-                // auto it02 = p;
-                //auto it12 = p - pos;
-                //if (bf.test_key(std::string_view(&reference[it1], &reference[it12])))
-                if(bf.test_key(std::string_view(&reference[it1], opt::k)))
-                    context_bf.add_key(std::string_view(&reference[it0], opt::ref_k));
-            
+            auto it0 = p - opt::ref_k;
+            auto it1 = p - opt::ref_k + pos;
+            char t[64];
+            char ckmer[64];
+            char* canon;
+            #pragma omp simd
+            for(int i =0 ; i < opt::k ; ++i)
+                t[i] = ref[it1 + i];
+            //cv[it0]=calc_hash(t, opt::k);
+            //reverse_cmpl(ckmer, kmer, k);
+            #pragma omp simd
+            for(int i = 0; i < opt::k; ++i) {
+                ckmer[i] = RCN[(int)t[opt::k - 1 - i]];
             }
+            
+            int i = 0;
+            //#pragma acc loop seq private(i)
+            while(i < opt::k && t[i] == ckmer[i])
+                ++i;
+            
+            uint64_t hash[2];
+            if(i == opt::k || t[i] < ckmer[i])
+                //randomfun(5);
+                canon = t;
+            else
+                canon = ckmer;
+            MurmurHash3_x64_128(canon, opt::k, 0, reinterpret_cast<void *>(&hash));
+                //  else
+            //randomfun(canon, 6);
+                //MurmurHash3_x64_128(ckmer, opt::k, 0, reinterpret_cast<void *>(&hash));
+            cv[it0] = hash[0];	
+            //if(bf.test_key(std::string_view(&reference[it1], opt::k)))
+            //  context_bf.add_key(std::string_view(&reference[it0], opt::ref_k));
+            
         }
+        #pragma omp parallel for
+        for(long unsigned int i = 0; i < size; ++i)
+        {
+            if(bf.ttest(cv[i]))
+                context_bf.add_key(std::string_view(&ref[i], opt::ref_k));
+        }
+        delete[] cv;
     }
 }
-    
+//int d = ceil(size/(1<<20));
+            /*for(int i = 0 ; i < d ; ++i)
+        {
+            long unsigned int lb = opt::ref_k + ((1<<20) * i);
+            long unsigned int ub = (opt::ref_k + ((1<<20) * (i+1)));
+            if(ub > size)
+                ub =size;
+            */
+
 
 /**
  * Method to compute and store the coverages of the alleles of the
@@ -365,86 +407,149 @@ int main(int argc, char *argv[])
     hts_set_log_level(HTS_LOG_OFF);
 
     parse_arguments(argc, argv);
-    //omp_set_num_threads(1);
+    //omp_set_num_threads(2);
 
-    // STEP 0: open and check input files
     CKMCFile kmer_db;
     if (!kmer_db.OpenForListing(opt::kmc_sample_path))
     {
         std::cerr << "ERROR: cannot open " << opt::kmc_sample_path << std::endl;
         return 1;
     }
-    // References are stored in a map
     std::unordered_map<std::string, std::string> refs;
     BF bf;
     KMAP ref_bf;
     BF context_bf;
-
     std::vector<Variant> vs;
-    // tbb::concurrent_vector<Variant> vs;
     std::vector<std::string> used_seq_names;
     std::future<void> bf_rank;
     double t0, t1;
-    // STEP 1: add VCF kmers to bloom filter
     t0 = omp_get_wtime();
-    #pragma omp parallel sections num_threads(4) default(shared) lastprivate(used_seq_names) proc_bind(spread)
+    //omp_set_nested(1);
+    #pragma omp parallel num_threads(6) default(shared) //proc_bind(spread)
     {
-        #pragma omp section
-            refs = read_references();
-        #pragma omp section
-            bf = BF(opt::bf_size);
-        #pragma omp section
-            context_bf = BF(opt::bf_size);
-        #pragma omp section 
+        #pragma omp single nowait
         {
+            #pragma omp task depend(out: refs)
+            {
+                double s = omp_get_wtime();
+                refs = read_references();
+                double e = omp_get_wtime();
+                std::cerr<<"references read in "<<e-s<<std::endl;
+            }
+            #pragma omp task depend(in: refs)
+            {
+                double s = omp_get_wtime();
+                omp_set_nested(1);
+                for(auto it = refs.begin(); it != refs.end(); ++it)
+                {
+                    std::string id = it->first;
+                    upper_sequence(refs[id]);
+                }
+                double e = omp_get_wtime();
+                std::cerr<<"upped all sequences in:  "<<e-s<<std::endl;
+
+
+            }
+            #pragma omp task
+            {
+                double s = omp_get_wtime();
+                omp_set_nested(1);
+                bf = BF(opt::bf_size);
+                double e = omp_get_wtime();
+                std::cerr<<"bf init done in "<<e-s<<std::endl;
+            }
+        #pragma omp task
+            {
+                double s = omp_get_wtime();
+                omp_set_nested(1);
+                context_bf = BF(opt::bf_size);
+                double e = omp_get_wtime();
+                std::cerr<<"context_bf init in "<<e-s<<std::endl;
+            }
+        #pragma omp task
+        {
+                double s = omp_get_wtime();
             vs = read_variants();
-            //used_seq_names.push_back(vs.at(0).seq_name);
-            for (auto v : vs){
-                // std::cerr<<"v name "<<v.seq_name<<std::endl;
+            for (auto v : vs)
+            {
                 if(used_seq_names.empty())
-                    //  std::cerr<<"u size "<<used_seq_names.size()<<std::endl;
                     used_seq_names.push_back(v.seq_name);
                 else
-                    //std::cerr<<"back "<<used_seq_names.back()<<std::endl;
                     if(used_seq_names.back() != v.seq_name)
                         used_seq_names.push_back(v.seq_name);
                 
             }
-            //sort(used_seq_names.begin(), used_seq_names.end());
-            //used_seq_names.erase(unique(used_seq_names.begin(), used_seq_names.end()),
-            //					 used_seq_names.end());
+                double e = omp_get_wtime();
+                std::cerr<<"variants read in "<<e-s<<std::endl;
+        }
         }
     }
     t1 = omp_get_wtime();
     std::cerr<<"Preprocessing done in: "<<t1-t0<<"s\n";
 
-    populate_bf_refbf(vs, bf, ref_bf, refs);
+    compute_main_filters(vs, bf, ref_bf, refs);
 
     t0 = omp_get_wtime();
     
     std::cerr<<"Bf done in: "<<t0-t1<<"s\n";
     pelapsed("BF creation complete", start_t);
     
-    bf_rank = std::async(std::launch::async, [&]() { bf.switch_mode(); });   
+    std::cerr<<"num device: "<<omp_get_num_devices()<<std::endl;
+    //bf_rank = std::async(std::launch::async, [&]() { bf.switch_mode(); });   
 
-    t0 = omp_get_wtime();
-    populate_context_bf(bf, context_bf, refs, used_seq_names);
-    t1 = omp_get_wtime();
-    std::cerr << "Context_bf done in: " << t1 - t0 <<"s\n";
+    //t0 = omp_get_wtime();
+                double s = omp_get_wtime();
+                omp_set_nested(1);
+                bf.switch_mode();
+                double e = omp_get_wtime();
+                std::cerr<<"switch done in "<<e-s<<std::endl;
+                 s = omp_get_wtime();
+                compute_context_filter(bf, context_bf, refs, used_seq_names);
+                context_bf.read_mode();
+                 e = omp_get_wtime();
+                std::cerr<<"context done in "<<e-s<<std::endl;
 
-    /*std::ofstream file;
-      file.open("strings2.txt");
-      for(auto s: cv)
-      file << s<<std::endl;
-      file.close();
-    */
-    // context_bf.switch_mode();
-    context_bf.read_mode();
-    t0 = omp_get_wtime();
-    std::cerr<<"Waiting...\n";
-    bf_rank.wait();
-    t1 = omp_get_wtime();
-    std::cerr<<"Waited for "<<t1 - t0 <<"s\n";
+
+                /* #pragma omp parallel
+    {
+        #pragma omp single nowait
+        {
+            #pragma omp task
+            {
+                double s = omp_get_wtime();
+                omp_set_nested(1);
+                bf.switch_mode();
+                double e = omp_get_wtime();
+                std::cerr<<"switch done in "<<e-s<<std::endl;
+            }
+            #pragma omp task
+            {
+                double s = omp_get_wtime();
+                compute_context_filter(bf, context_bf, refs, used_seq_names);
+                context_bf.read_mode();
+                double e = omp_get_wtime();
+                std::cerr<<"context done in "<<e-s<<std::endl;
+            }
+                */
+    
+            //t1 = omp_get_wtime();
+            //std::cerr << "Context_bf done in: " << t1 - t0 <<"s\n";
+            
+            /*std::ofstream file;
+              file.open("strings2.txt");
+              for(auto s: cv)
+              file << s<<std::endl;
+              file.close();
+            */
+            // context_bf.switch_mode();
+            //t0 = omp_get_wtime();
+            //std::cerr<<"Waiting...\n";
+            //bf_rank.wait();
+            //t1 = omp_get_wtime();
+            //std::cerr<<"Waited for "<<t1 - t0 <<"s\n";
+                //}
+                //}
+            
     pelapsed("Reference BF creation complete", start_t);
             
     // STEP 2: test variants present in read sample
@@ -466,3 +571,56 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+/*void populate_context_bf(const BF &bf, BF &context_bf,
+                         const std::unordered_map<std::string, std::string> &refs,
+                         const std::vector<std::string> &used_seq_names) {
+    if(used_seq_names.size() == 0)
+        return;
+    for (long unsigned int seq = 0; seq < used_seq_names.size(); ++seq)
+    {
+        long unsigned int size = refs.at(used_seq_names[seq]).size();
+        const char* ref = refs.at(used_seq_names[seq]).c_str();
+        int pos = (opt::ref_k - opt::k) / 2;
+        //#pragma omp parallel for proc_bind(spread)#pragma omp end declare target
+        //std::cerr<<"num devices: "<<omp_get_num_devices()<<std::endl;
+        uint64_t* cv = new uint64_t[size];
+        #pragma acc parallel loop independent gang vector copyin(ref[:size], pos) copyout(cv[:size])
+        for (long unsigned int p = opt::ref_k; p < size; ++p)
+        {
+            auto it0 = p - opt::ref_k;
+            auto it1 = p - opt::ref_k + pos;
+            char t[64];
+            char ckmer[64];
+            #pragma acc loop independent vector(64)
+            for(int i =0 ; i < opt::k ; ++i)
+                t[i] = ref[it1 + i];
+            //cv[it0]=calc_hash(t, opt::k);
+            //reverse_cmpl(ckmer, kmer, k);
+            #pragma acc loop independent vector(64)
+            for(int i = 0; i < opt::k; ++i) {
+                ckmer[i] = RCN[(int)t[opt::k - 1 - i]];
+            }
+            int i = 0;
+            #pragma acc loop seq private(i)
+            while(i < opt::k && t[i] == ckmer[i])
+                ++i;
+            uint64_t hash[2];
+            if(i == opt::k || t[i] < ckmer[i])
+                MurmurHash3_x64_128(t, (int)opt::k, 0, reinterpret_cast<void *>(&hash));
+            else
+                MurmurHash3_x64_128(ckmer, (int)opt::k, 0, reinterpret_cast<void *>(&hash));
+            cv[it0] = hash[0];	
+            
+            //if (bf.test_key(std::string_view(&reference[it1], &reference[it12])))
+            
+            //if(bf.test_key(std::string_view(&reference[it1], opt::k)))
+            //  context_bf.add_key(std::string_view(&reference[it0], opt::ref_k));
+        }
+        for(long unsigned int i = 0; i < size; ++i)
+            if(bf.ttest(cv[i]))
+                
+            delete[] cv;
+    }
+}
+
+*/

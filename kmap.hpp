@@ -41,16 +41,17 @@
 //     'N', 0,   0, 0,   0,   0,   'A', 0,   0,   0,   // 110
 //     0,   0,   0, 0,   0,   0,   0,   0              // 120
 // };
-#include "bloom_filter.hpp"
+
+extern const char RCN[128];
 struct KMAP {
-  std::unordered_map<std::string, int> kmers;
-  std::unordered_map<std::string, int> _times;
+	std::unordered_map<std::string, int> kmers;
+	std::unordered_map<std::string, int> _times;
 
   KMAP() {}
 
-	static char _compl(const char &c) { return opt::RCN[(int)c]; }
+	static char _compl(const char &c) { return RCN[(int)c]; }
 
-  std::string canonical(const char* kmer) {
+	/*std::string canonical(const char* kmer) {
     uint k = strlen(kmer);
     char ckmer[k + 1];
     strcpy(ckmer, kmer);
@@ -61,6 +62,7 @@ struct KMAP {
     std::string kmer_string (ckmer);
     return kmer_string;
   }
+	*/
 	std::string canonical(const std::string& kmer) const {
 		std::string ckmer(kmer);
 		std::transform(ckmer.begin(), ckmer.end(), ckmer.begin(), _compl);
@@ -74,9 +76,9 @@ struct KMAP {
 	{
 		std::string ckmer(kmer);
 		int size = ckmer.size();
-        #pragma ivdep
+        //#pragma ivdep
 		for(int i = 0; i < size; ++i)
-				ckmer[i] = opt::RCN[(int)ckmer[i]];
+				ckmer[i] = RCN[(int)ckmer[i]];
 		std::reverse(ckmer.begin(), ckmer.end());
 			return ckmer;
 		
@@ -118,6 +120,16 @@ struct KMAP {
       ++_times[ckmer];
     }
   }
+	void increment (const std::string& kmer, int counter)
+	{
+		std::string ckmer = canonical(kmer);
+		if(kmers.find(ckmer) != kmers.end())
+		{
+			uint32_t new_value = kmers[ckmer] + counter;
+			kmers[ckmer] = new_value < 250 ? new_value : 250;
+			++_times[ckmer];
+		}
+	}
 
   void increment_with_average(const char* kmer, int counter) {
     std::string ckmer = canonical(kmer);
@@ -137,6 +149,21 @@ struct KMAP {
   }
 
   int get_times(const char* kmer) {
+    std::string ckmer = canonical(kmer);
+    if(kmers.find(ckmer) != kmers.end())
+      return _times[ckmer];
+    else
+      return 0;
+  }
+	int get_count(const std::string& kmer) {
+    std::string ckmer = canonical(kmer);
+    if(kmers.find(ckmer) != kmers.end())
+      return kmers[ckmer];
+    else
+      return 0;
+  }
+
+	int get_times(const std::string& kmer) {
     std::string ckmer = canonical(kmer);
     if(kmers.find(ckmer) != kmers.end())
       return _times[ckmer];

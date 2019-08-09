@@ -25,7 +25,8 @@
 
 #include <type_traits>
 #include <typeinfo>
-#ifndef MSVC_COMPILER
+//#ifndef MSVC_COMPILER
+#ifndef _MSC_VER
 #include <cxxabi.h>
 #endif
 
@@ -40,7 +41,8 @@ uint64_t _id_helper::id = 0;
 std::string basename(std::string file)
 {
     file = disk_file_name(file); // remove RAM-prefix
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
     char* c = _strdup((const char*)file.c_str());
     char file_name[_MAX_FNAME] = { 0 };
     ::_splitpath_s(c, NULL, 0, NULL, NULL, file_name, _MAX_FNAME, NULL, 0);
@@ -57,7 +59,8 @@ std::string dirname(std::string file)
 {
     bool ram_file = is_ram_file(file);
     file = disk_file_name(file); // remove RAM-prefix
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
     char* c = _strdup((const char*)file.c_str());
     char dir_name[_MAX_DIR] = { 0 };
     char drive[_MAX_DRIVE] = {0};
@@ -80,7 +83,8 @@ std::string dirname(std::string file)
 
 uint64_t pid()
 {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
     return _getpid();
 #else
     return getpid();
@@ -89,7 +93,8 @@ uint64_t pid()
 
 char* str_from_errno()
 {
-#ifdef MSVC_COMPILER
+//#ifdef MSVC_COMPILER
+#ifdef _MSC_VER
 #pragma warning(disable:4996)
     return strerror(errno);
 #pragma warning(default:4996)
