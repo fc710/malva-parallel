@@ -1,5 +1,5 @@
-COMPILER1 = $(shell which icpc | grep -o "icpc")
-COMPILER2 = $(shell which clang++ | grep -o "clang++")
+COMPILER1 = #$(shell which icpc | grep -o "icpc")
+COMPILER2 = #$(shell which clang++ | grep -o "clang++")
 CXXFLAGS = -Wall -g -std=c++17 -O3
 ifeq ($(COMPILER1), icpc)
 	CXX = icpc
@@ -15,7 +15,7 @@ endif
 
 INCLUDES = -I. -I./sdsl-lite/build/include -I./htslib/htslib -I./KMC
 LDFLAGS = -L./sdsl-lite/build/lib -L./sdsl-lite/build/external/libdivsufsort/lib -L./htslib/
-LDLIBS = -lhts -lz -lsdsl -ldivsufsort -ldivsufsort64 -ltbb
+LDLIBS = -lhts -lz -lsdsl -ldivsufsort -ldivsufsort64 
 OBJS = main.o MurmurHash3.o ./KMC/kmc_api/kmc_file.o ./KMC/kmc_api/kmer_api.o ./KMC/kmc_api/mmer.o
 PROG = malva-geno
 
