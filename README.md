@@ -137,11 +137,11 @@ cd ..
 
 First tell the script where you installed clang by executing:
 ```bash
-sed -i "5iclang_prefix=$install_prefix" config
+sed -i "5iclang_prefix=$install_prefix" config.sh
 ```
 Then run :
 ```bash
-./config
+./config.sh
 ```
 Unless these environment variables are set permanentely (e.g added in ~/.bashrc), this script has to be rerun every time the variables are resetted.
 
