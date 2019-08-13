@@ -100,8 +100,8 @@ cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$install_prefix-DCMAKE_C
   version=8.3.0
   sudo mkdir -p $install_prefix/gcc/$version/include/c++
   sudo mkdir -p $install_prefix/gcc/$version/lib/gcc/x86_64-unknown-linux-gnu
-  sudo ln -s /usr/include/c++/$version $install_prefix/gcc/$version/include/c++/$version/
-  sudo ln -s /usr/lib/gcc/x86_64-linux-gnu/$version $install_prefix/gcc/$version/lib/gcc/x86_64-unknown-linux-gnu/$version/
+  sudo ln -s /usr/include/c++/$version $install_prefix/gcc/$version/include/c++/$version
+  sudo ln -s /usr/lib/gcc/x86_64-linux-gnu/$version $install_prefix/gcc/$version/lib/gcc/x86_64-unknown-linux-gnu/$version
   ```
   this way the flag is --gcc-toolchain=$install_prefix/gcc/$version
   - *CUDA_HOST_COMPILER* specifies the binary to a gcc 7 or lower for CUDA 10.0.
@@ -139,13 +139,13 @@ First tell the script where you installed clang by executing:
 ```bash
 sed -i "5iclang_prefix=$install_prefix" config
 ```
-
+Then run :
 ```bash
 ./config
 ```
 Unless these environment variables are set permanentely (e.g added in ~/.bashrc), this script has to be rerun every time the variables are resetted.
 
-#### Finally build the application
+#### Build the application
 
 ```bash
 make
@@ -153,4 +153,4 @@ make
 
 ## Usage
 
-Some examples on the usage [here].(https://github.com/AlgoLab/malva#usage)
+Some examples on the usage [here](https://github.com/AlgoLab/malva#usage).
