@@ -234,13 +234,11 @@ void compute_context_filter(const BF &bf, BF &context_bf,
             
             uint64_t hash[2];
             if(i == opt::k || t[i] < ckmer[i])
-                //randomfun(5);
                 canon = t;
             else
                 canon = ckmer;
             MurmurHash3_x64_128(canon, opt::k, 0, reinterpret_cast<void *>(&hash));
                 //  else
-            //randomfun(canon, 6);
                 //MurmurHash3_x64_128(ckmer, opt::k, 0, reinterpret_cast<void *>(&hash));
             cv[it0] = hash[0];	
             //if(bf.test_key(std::string_view(&reference[it1], opt::k)))
