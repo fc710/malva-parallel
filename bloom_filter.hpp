@@ -173,9 +173,9 @@ public:
     _counts = int_vector<8>(_brank(_size), 0, 8);
     _times = int_vector<8>(_brank(_size), 0, 8);
   }
-	void read_mode() {
-		_mode = true;
-	}
+    void read_mode() {
+        _mode = true;
+    }
 
   bool increment(const char *kmer, const uint32 counter) {
     if (!_mode)
